@@ -1,36 +1,44 @@
 # autotunnel
 
-Auto-discovers listening ports on a remote host and creates SSH tunnels for them locally.
+Auto-discovers listening ports on a remote host and creates SSH tunnels for them locally. Nothing to install on the remote — everything runs from your Mac.
 
 ## How it works
 
-1. **Remote** (`check_ports.sh`): Periodically scans for listening TCP ports, excludes well-known services (SSH, nginx, redis, containerd), writes the rest to `~/.TUNNEL_PORTS`
-2. **Local** (`tunnel-monitor.sh`): Runs on a schedule, checks if there's an active SSH session to the remote host, reads the port list, and creates any missing `-L` tunnels
+1. Triggers automatically when you SSH into the configured host
+2. Discovers listening TCP ports remotely via `ss`
+3. Multiplexes `-L` tunnels over your existing SSH connection
+4. Re-checks every `CHECK_INTERVAL` seconds until you disconnect
 
-Only creates tunnels when you already have an interactive SSH session open — no tunnels are created otherwise.
+All tunnels share the single SSH connection and die automatically when you disconnect.
 
 ## Setup
 
-Edit `autotunnel.conf` to match your environment, then:
+Edit `autotunnel.conf`, then add this to your `~/.ssh/config`:
+
+```
+Host devbox
+    ControlMaster auto
+    ControlPath ~/.ssh/autotunnel-%r@%h:%p.sock
+    ControlPersist yes
+    PermitLocalCommand yes
+    LocalCommand /path/to/autotunnel.sh loop &
+```
+
+Make sure `AUTOTUNNEL_SOCKET` in `autotunnel.conf` matches the `ControlPath` above (or use the defaults — they already match for host `devbox`).
+
+## Usage
 
 ```bash
-# Install the local scheduled task (macOS launchd)
-./install-local.sh
+# One-shot check
+./autotunnel.sh
 
-# Deploy check_ports.sh to remote and set up cron
-./install-remote.sh
+# Continuous loop (used by LocalCommand)
+./autotunnel.sh loop
 ```
 
 ## Uninstall
 
-```bash
-# Local
-launchctl unload ~/Library/LaunchAgents/com.autotunnel.monitor.plist
-rm ~/Library/LaunchAgents/com.autotunnel.monitor.plist
-
-# Remote
-ssh devbox "crontab -l | grep -v check_ports.sh | crontab -"
-```
+Remove the SSH config block above from `~/.ssh/config`.
 
 ## Configuration
 
@@ -39,8 +47,7 @@ All settings live in `autotunnel.conf`:
 | Variable | Default | Description |
 |---|---|---|
 | `REMOTE_HOST` | `devbox` | SSH host alias or address |
-| `REMOTE_USER` | `ec2-user` | Remote username |
-| `REMOTE_HOME` | `/home/ec2-user` | Remote home directory |
-| `EXCLUDE_PORTS` | `22` | Ports to never tunnel |
-| `CHECK_INTERVAL` | `30` | Seconds between local checks |
+| `EXCLUDE_PORTS` | `22` | Ports to never tunnel (space-separated) |
+| `CHECK_INTERVAL` | `30` | Seconds between checks |
 | `LOG_FILE` | `~/.autotunnel.log` | Local log path |
+| `AUTOTUNNEL_SOCKET` | `~/.ssh/autotunnel-$REMOTE.sock` | ControlMaster socket path |
